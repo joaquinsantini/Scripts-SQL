@@ -3,11 +3,13 @@
 USE [<Base de datos>]
 GO
 
+-- Compruebo existencia de tabla temporal.
 IF (ISNULL(OBJECT_ID('tempdb..#TMP_ColumnasTablas'), '') <> '')
 BEGIN
 	DROP TABLE #TMP_ColumnasTablas
 END
 
+-- Creo tabla temporal.
 CREATE TABLE #TMP_ColumnasTablas (
 	NombreTabla	VARCHAR(255),
 	NombreColumna	VARCHAR(255),
@@ -15,6 +17,7 @@ CREATE TABLE #TMP_ColumnasTablas (
 	FlagMostrar	INT
 )
 
+-- Lleno la tabla temporal con las tablas donde se quiere buscar (pueden ser todas las tablas de una base).
 INSERT INTO #TMP_ColumnasTablas (NombreTabla, NombreColumna, FlagProcesado, FlagMostrar)
 	SELECT	SO.name		AS 'NombreTabla',
 		SC.name		AS 'NombreColumna',
@@ -37,6 +40,7 @@ DECLARE @SQL		NVARCHAR(MAX)
 DECLARE @Cantidad	INT
 DECLARE @Error		INT
 
+-- Loop principal de búsqueda.
 WHILE (EXISTS(SELECT TOP (1) * FROM #TMP_ColumnasTablas WHERE FlagProcesado = 0))
 BEGIN
 	SELECT TOP (1)	@Tabla = TMP.NombreTabla,
@@ -76,11 +80,13 @@ BEGIN
 			NombreColumna = @Columna
 END
 
+-- Muestro resultados
 SELECT	TMP.NombreTabla		AS 'Nombre Tabla',
 	TMP.NombreColumna	AS 'Nombre Columna'
 	FROM	#TMP_ColumnasTablas TMP
 	WHERE	TMP.FlagMostrar = 1
 
+-- Elimino tabla temporal.
 DROP TABLE #TMP_ColumnasTablas
 
 

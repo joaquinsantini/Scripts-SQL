@@ -10,6 +10,7 @@ GO
 
 SET NOCOUNT ON
 
+-- Variables a utilizar
 DECLARE @Ambiente		VARCHAR(255)
 DECLARE @BBDD			VARCHAR(255)
 DECLARE @Tabla			VARCHAR(255)
@@ -119,11 +120,13 @@ END
 
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Tabla donde se van a almacenar las líneas del script a exportar.
 CREATE TABLE Script (
 	Linea		INT IDENTITY NOT NULL PRIMARY KEY,
 	Texto		VARCHAR(7900) NOT NULL
 )
 
+-- Inserto header del script.
 INSERT INTO Script(Texto) VALUES('USE [' + @BBDD + ']')
 INSERT INTO Script(Texto) VALUES('')
 INSERT INTO Script(Texto) VALUES('SET LANGUAGE ''us_english''')
@@ -131,6 +134,7 @@ INSERT INTO Script(Texto) VALUES('SET NOCOUNT ON')
 INSERT INTO Script(Texto) VALUES('GO')
 INSERT INTO Script(Texto) VALUES('')
 
+-- Verifico que se haya ingresado una tabla de log.
 IF (@TablaLog IS NOT NULL)
 BEGIN
 	INSERT INTO Script(Texto) VALUES('DECLARE @UsuarioLog	VARCHAR(15)')
@@ -141,6 +145,7 @@ BEGIN
 	INSERT INTO Script(Texto) VALUES('')
 END
 
+-- Inserto inicio de transacción.
 INSERT INTO Script(Texto) VALUES('BEGIN TRANSACTION Insert_Tabla')
 INSERT INTO Script(Texto) VALUES('')
 
@@ -148,8 +153,11 @@ DECLARE @Contador INT
 
 SELECT	@Contador = 0
 
+-- En @Query almaceno la query de creación de una tabla temporal dependiendo de la cantidad de columnas que tenga el archivo .txt. Debe coincidir con
+-- lo ingresado en la variable @CantidadColumnas.
 SELECT	@Query = 'CREATE TABLE ##TMP_Registros ( '
 
+-- Loope para buscar las columnas.
 WHILE (@Contador <> @CantidadColumnas)
 BEGIN
 	SELECT	@Contador = @Contador + 1
@@ -177,6 +185,7 @@ BEGIN
 	RETURN
 END
 
+-- En @Query almaceno el bulk insert del archivo .txt en la tabla temporal ##TMP_Registros
 SELECT @Query =	'BULK INSERT ##TMP_Registros
 			FROM ' + '''' + REPLACE(@PathTxt, '''', '''''') + '''
 			WITH (	CODEPAGE = ''RAW'',
@@ -205,6 +214,7 @@ SELECT	@Columnas = '('
 
 SELECT	@Contador = 0
 
+-- Loop para determinar la cadena de values.
 WHILE (@Contador <> @CantidadColumnas)
 BEGIN
 	SELECT	@Contador = @Contador + 1
@@ -236,6 +246,7 @@ BEGIN
 	END
 END
 
+-- Variables de uso dinámico.
 DECLARE @CantidadRegistros	INT
 DECLARE @ContadorAux		INT
 DECLARE @Values			VARCHAR(7900)
@@ -248,6 +259,7 @@ SELECT	@CantidadRegistros = COUNT(*) - 1 FROM ##TMP_Registros
 
 SELECT	@Contador = 0
 
+-- Tabla temporal donde se va a almacenar el tipo de columna para determinar el insert.
 CREATE TABLE ##TMP_Columnas (
 	Table_Cat		VARCHAR(255),
 	Table_Schem		VARCHAR(255),
@@ -270,6 +282,7 @@ CREATE TABLE ##TMP_Columnas (
 	Ss_Data_Type		INT
 )
 
+-- Loop principal donde se recorren los registros del archivo .txt.
 WHILE (@Contador <> @CantidadRegistros)
 BEGIN
 	SELECT	@Contador = @Contador + 1
@@ -278,6 +291,7 @@ BEGIN
 
 	SELECT	@Values = '('
 
+	-- Loop para determinar variables @Columnas y @Values.
 	WHILE (@ContadorAux <> @CantidadColumnas)
 	BEGIN
 		SELECT	@ContadorAux = @ContadorAux + 1
@@ -357,6 +371,7 @@ BEGIN
 		END
 	END
 
+	-- Inserto registro.
 	INSERT INTO Script(Texto) VALUES('------------------------ Registro ' + CONVERT(VARCHAR(10), @Contador) + ' ------------------------')
 	INSERT INTO Script(Texto) VALUES('INSERT INTO ' + @Tabla + ' ' + @Columnas)
 	INSERT INTO Script(Texto) VALUES('	VALUES ' + @Values)
@@ -390,12 +405,13 @@ BEGIN
 	END
 END
 
+-- Inserto commit de transacción.
 INSERT INTO Script(Texto) VALUES('COMMIT TRANSACTION Insert_Tabla')
 INSERT INTO Script(Texto) VALUES('')
 INSERT INTO Script(Texto) VALUES('')
 INSERT INTO Script(Texto) VALUES('RETURN')
 
--- Generación del script
+-- Generación del script.
 IF (RIGHT(@PathExportacion, 1) <> '\')
 BEGIN
 	SELECT	@PathExportacion = @PathExportacion + '\'
@@ -446,12 +462,14 @@ BEGIN
 	RETURN
 END
 
+-- Elimino tablas usadas.
 DROP TABLE Script
 
 DROP TABLE ##TMP_Registros
 
 DROP TABLE ##TMP_Columnas
 
+-- Printeo el path donde se generó el script con éxito.
 PRINT	'Script generado en ' + @PathScript
 
 

@@ -1,6 +1,7 @@
 -- Script que imprime en una impresora perteneciente a la red local cualquier documento .pdf.
 -- Es necesario un conversor de archivos .pdf a .ps estilo GhostScript.
 
+-- Variables a utilizar.
 DECLARE @PathPDF	VARCHAR(255)
 DECLARE @PathConversor	VARCHAR(255)
 DECLARE @PathImpresora	VARCHAR(255)

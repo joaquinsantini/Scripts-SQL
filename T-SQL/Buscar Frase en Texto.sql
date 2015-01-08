@@ -1,10 +1,13 @@
 -- Script que devuelve una tabla con el número de ocurrencia y la posición de donde empieza una frase que se busca en otra.
+
+-- Variables a utilizar.
 DECLARE @Frase		VARCHAR(MAX)
 DECLARE @FraseABuscar	VARCHAR(MAX)
 
 SELECT	@Frase = '<Frase en donde se va a buscar>'
 SELECT	@FraseABuscar = '<Frase que se quiere buscar>'
 
+-- Tabla temporal donde se van a almacenar los resultados.
 CREATE TABLE #Posiciones (
 	Ocurrencia	INT,
 	Posicion	INT
@@ -20,6 +23,7 @@ SELECT	@Contador = 0
 SELECT	@Salir = 0
 SELECT	@PosAnterior = 0
 
+-- Loop principal de búsqueda.
 WHILE (@Salir = 0)
 BEGIN
 	SELECT	@Pos = CHARINDEX(@FraseABuscar, @Frase)
@@ -46,8 +50,10 @@ BEGIN
 	END
 END
 
+-- Muestro resultados.
 SELECT * FROM #Posiciones
 
+-- Elimino la tabla temporal.
 DROP TABLE #Posiciones
 
 
