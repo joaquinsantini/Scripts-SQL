@@ -1,476 +1,507 @@
 -- Script que desde un Excel guardado como "Texto separado por tabulaciones" exporta un script para hacer inserts en la tabla deseada.
--- El archivo Excel debe tener:
---	a. En la primer fila los nombres de las columnas distintas de NULL. Las columnas nulleables no se especifican.
---	b. Como última columna deben estar todos los registros numerados empezando por la primer fila. Es decir, la primer fila (la que tiene el nombre de las columnas)
---	debe tener el número 1, la fila de abajo el número 2, y así sucesivamente.
---	c. Al exportar el archivo Excel a .txt, sacarle el último "Enter". Esto es, el cursor debe quedar "titilando" después de la última numeración de la última fila.
+-- El archivo Excel debe tener en la primer fila los nombres de las columnas distintas de NULL. Las columnas nulleables no se especifican.
 
-USE [Master]
+USE [master]
 GO
 
-SET NOCOUNT ON
+SET NOCOUNT ON;
+
 
 -- Variables a utilizar
-DECLARE @Ambiente		VARCHAR(255)
-DECLARE @BBDD			VARCHAR(255)
-DECLARE @Tabla			VARCHAR(255)
-DECLARE @TablaLog		VARCHAR(255)
-DECLARE @CantidadColumnas	INT
-DECLARE @Error			INT
-DECLARE @ErrorMessage		VARCHAR(1023)
-DECLARE @PathExportacion	VARCHAR(255)
-DECLARE @PathTxt		VARCHAR(255)
-DECLARE @Existe			INT
-DECLARE @Query			NVARCHAR(4000)
-DECLARE @QueryParams		NVARCHAR(4000)
+DECLARE @BBDD			VARCHAR(255),
+	@Owner			VARCHAR(255),
+	@Tabla			VARCHAR(255),
+	@TablaLog		VARCHAR(255),
+	@CantidadColumnas	INT,
+	@Error			INT,
+	@ErrorMessage		VARCHAR(1023),
+	@PathExportacion	VARCHAR(255),
+	@PathTxt		VARCHAR(255),
+	@Existe			INT,
+	@Query			NVARCHAR(4000),
+	@QueryParams		NVARCHAR(4000);
 
 DECLARE @TMP_Existe TABLE (
 	ExisteArchivo		INT,
 	ExisteDirectorio	INT,
 	ExisteDirectorioPadre	INT
-)
+);
 
--- Ambiente: linked server deseado.
-SELECT	@Ambiente = '<Ambiente>'
+CREATE TABLE Script (
+	Linea		INT IDENTITY NOT NULL PRIMARY KEY,
+	Texto		VARCHAR(7900) NOT NULL
+);
 
--- BBDD: base de datos donde se encuentra la tabla.
-SELECT	@BBDD = '<Base>'
 
--- Tabla: tabla donde se quieren hacer los inserts.
-SELECT	@Tabla = '<Tabla>'
+-- @BBDD: base de datos donde se encuentra la tabla
+SELECT	@BBDD = '<Base>';
 
--- TablaLog: tabla de log donde se realizan los inserts. Si no existe tabla de Log asignar NULL.
-SELECT	@TablaLog = '<TablaLog>'
 
--- PathExportacion: path donde se va a exportar el archivo .sql.
-SELECT	@PathExportacion = '<Path>'
+-- @Owner: owner donde se encuentra la tabla. El defecto es dbo.
+SELECT	@Owner = 'dbo';
 
--- PathTxt: path donde se encuentra el archivo txt a leer.
-SELECT	@PathTxt = '<PathTxt>'
 
--- CantidadColumnas: cantidad de columnas distintas de NULL que contiene el archivo txt.
-SELECT	@CantidadColumnas = 5
+-- @Tabla: tabla donde se quieren hacer los inserts
+SELECT	@Tabla = '<Tabla>';
+
+
+-- @TablaLog: tabla de log donde se realizan los inserts. Si no existe tabla de Log asignar NULL
+SELECT	@TablaLog = NULL;
+
+
+-- @PathExportacion: carpeta donde se va a exportar el archivo .sql. Debe ser una ruta compartida
+SELECT	@PathExportacion = '<Carpeta>';
+
+
+-- @PathTxt: path completo del archivo .txt a leer. Debe estar en una ruta compartida
+SELECT	@PathTxt = '<Archivo>';
+
+
+-- @CantidadColumnas: cantidad de columnas distintas de NULL que contiene el archivo txt
+SELECT	@CantidadColumnas = 0;
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- Verifico existencia de archivo txt en FS.
+-- Verifico existencia de archivo txt en FS
 INSERT INTO @TMP_Existe (ExisteArchivo, ExisteDirectorio, ExisteDirectorioPadre)
-	EXECUTE @Error = Master.dbo.xp_fileexist @PathTxt
+	EXECUTE @Error = master.dbo.xp_fileexist @PathTxt;
 
 IF (@Error <> 0)
 BEGIN
-	SELECT	@ErrorMessage = 'Error al buscar archivo txt en FileSystem.'
+	PRINT	'Error al buscar archivo txt en FileSystem.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	RETURN
+	RETURN;
 END
 
 IF ((SELECT ExisteArchivo FROM @TMP_Existe) = 0)
 BEGIN
-	SELECT	@ErrorMessage = 'El archivo txt que desea importar no existe.'
+	PRINT	'El archivo txt que desea importar no existe.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	RETURN
+	RETURN;
 END
 
-DELETE @TMP_Existe
+DELETE @TMP_Existe;
 
--- Verifico existencia del path de exportación en FS.
+-- Verifico existencia del path de exportación en FS
 INSERT INTO @TMP_Existe (ExisteArchivo, ExisteDirectorio, ExisteDirectorioPadre)
-	EXECUTE @Error = Master.dbo.xp_fileexist @PathExportacion
+	EXECUTE @Error = master.dbo.xp_fileexist @PathExportacion;
 
 IF (@Error <> 0)
 BEGIN
-	SELECT	@ErrorMessage = 'Error al verificar path de exportación en FileSystem.'
+	PRINT	'Error al verificar path de exportación en FileSystem.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	RETURN
+	RETURN;
 END
 
 IF ((SELECT ExisteDirectorio FROM @TMP_Existe) = 0)
 BEGIN
-	SELECT	@ErrorMessage = 'El path de exportación no es válido.'
+	PRINT	'El path de exportación no es válido.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	RETURN
+	RETURN;
 END
 
--- Verifico que se haya ingresado una base de datos.
-IF (@BBDD IS NULL)
+-- Verifico que se haya ingresado una base de datos
+IF (@BBDD IS NULL OR LEN(@BBDD) = 0)
 BEGIN
-	SELECT	@ErrorMessage = 'No indicó la base de datos donde se encuentra la tabla.'
+	PRINT	'No indicó la base de datos donde se encuentra la tabla.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	RETURN
+	RETURN;
 END
 
--- Verifico que se haya ingresado una tabla.
-IF (@Tabla IS NULL)
+-- Verifico que se haya ingresado un owner
+IF (@Owner IS NULL OR LEN(@Owner) = 0)
 BEGIN
-	SELECT	@ErrorMessage = 'No indicó la tabla donde se van a realizar los insert.'
+	PRINT	'No indicó el owner donde se encuentra la tabla.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	RETURN
+	RETURN;
+END
+
+-- Verifico que se haya ingresado una tabla
+IF (@Tabla IS NULL OR LEN(@Tabla) = 0)
+BEGIN
+	PRINT	'No indicó la tabla donde se van a realizar los insert.';
+
+	DROP TABLE Script;
+
+	RETURN;
+END
+
+-- Verifico que la tabla se encuentre en la base de datos
+SELECT	@Query = '	IF (EXISTS(SELECT 1 FROM <<BBDD>>.<<OWNER>>.sysobjects WHERE Type = ''U'' AND Name = @Tabla))
+			BEGIN
+				SELECT	@Existe = 1;
+			END ELSE BEGIN
+				SELECT	@Existe = 0;
+			END';
+
+SELECT	@Query = REPLACE(REPLACE(@Query, '<<BBDD>>', @BBDD), '<<OWNER>>', @Owner);
+
+SELECT	@QueryParams = '@Tabla VARCHAR(255), @Existe INT OUTPUT';
+
+EXECUTE @Error = sp_executesql @Query, @QueryParams, @Tabla = @Tabla, @Existe = @Existe OUTPUT;
+
+IF (@Error <> 0)
+BEGIN
+	PRINT	'Error verificando existencia de tabla en base de datos.';
+
+	DROP TABLE Script;
+
+	RETURN;
+END
+
+IF (@Existe = 0)
+BEGIN
+	PRINT	'La tabla especificada no existe en la base de datos especificada.';
+
+	DROP TABLE Script;
+
+	RETURN;
+END
+
+-- Verifico la cantidad de columnas ingresadas
+IF (@CantidadColumnas <= 0)
+BEGIN
+	PRINT	'La cantidad de columnas debe ser mayor a cero.';
+
+	DROP TABLE Script;
+
+	RETURN;
 END
 
 
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- Tabla donde se van a almacenar las líneas del script a exportar.
-CREATE TABLE Script (
-	Linea		INT IDENTITY NOT NULL PRIMARY KEY,
-	Texto		VARCHAR(7900) NOT NULL
-)
+-- Inserto header del script
+INSERT INTO Script(Texto) VALUES('USE [' + @BBDD + '];');
+INSERT INTO Script(Texto) VALUES('');
+INSERT INTO Script(Texto) VALUES('SET LANGUAGE ''us_english'';');
+INSERT INTO Script(Texto) VALUES('SET NOCOUNT ON;');
+INSERT INTO Script(Texto) VALUES('GO');
+INSERT INTO Script(Texto) VALUES('');
+INSERT INTO Script(Texto) VALUES('DECLARE @Error	INT;');
+INSERT INTO Script(Texto) VALUES('');
 
--- Inserto header del script.
-INSERT INTO Script(Texto) VALUES('USE [' + @BBDD + ']')
-INSERT INTO Script(Texto) VALUES('')
-INSERT INTO Script(Texto) VALUES('SET LANGUAGE ''us_english''')
-INSERT INTO Script(Texto) VALUES('SET NOCOUNT ON')
-INSERT INTO Script(Texto) VALUES('GO')
-INSERT INTO Script(Texto) VALUES('')
 
--- Verifico que se haya ingresado una tabla de log.
+-- Verifico que se haya ingresado una tabla de log
 IF (@TablaLog IS NOT NULL)
 BEGIN
-	INSERT INTO Script(Texto) VALUES('DECLARE @UsuarioLog	VARCHAR(15)')
-	INSERT INTO Script(Texto) VALUES('DECLARE @SistemaLog	VARCHAR(15)')
-	INSERT INTO Script(Texto) VALUES('')
-	INSERT INTO Script(Texto) VALUES('SELECT	@UsuarioLog = ''MECANUS''')
-	INSERT INTO Script(Texto) VALUES('SELECT	@SistemaLog = ''SISTEMA'' --Reemplazar por el que corresponda.')
-	INSERT INTO Script(Texto) VALUES('')
+	INSERT INTO Script(Texto) VALUES('DECLARE @UsuarioLog	VARCHAR(15);');
+	INSERT INTO Script(Texto) VALUES('DECLARE @SistemaLog	VARCHAR(15);');
+	INSERT INTO Script(Texto) VALUES('');
+	INSERT INTO Script(Texto) VALUES('SELECT	@UsuarioLog = ''<<USUARIOLOG>>''; --Reemplazar por el que corresponda.');
+	INSERT INTO Script(Texto) VALUES('SELECT	@SistemaLog = ''<<SISTEMALOG>>''; --Reemplazar por el que corresponda.');
+	INSERT INTO Script(Texto) VALUES('');
 END
 
--- Inserto inicio de transacción.
-INSERT INTO Script(Texto) VALUES('BEGIN TRANSACTION Insert_Tabla')
-INSERT INTO Script(Texto) VALUES('')
 
-DECLARE @Contador INT
+-- Inserto inicio de transacción
+INSERT INTO Script(Texto) VALUES('BEGIN TRANSACTION Insert_Tabla;');
+INSERT INTO Script(Texto) VALUES('');
 
-SELECT	@Contador = 0
+DECLARE @Contador INT;
+
+SELECT	@Contador = 0;
+
 
 -- En @Query almaceno la query de creación de una tabla temporal dependiendo de la cantidad de columnas que tenga el archivo .txt. Debe coincidir con
--- lo ingresado en la variable @CantidadColumnas.
-SELECT	@Query = 'CREATE TABLE ##TMP_Registros ( '
+-- lo ingresado en la variable @CantidadColumnas
+SELECT	@Query = 'CREATE TABLE ##TMP_Registros ( ';
 
--- Loope para buscar las columnas.
+
+-- LOOP para buscar las columnas
 WHILE (@Contador <> @CantidadColumnas)
 BEGIN
-	SELECT	@Contador = @Contador + 1
+	SELECT	@Contador = @Contador + 1;
 
-	SELECT	@Query = @Query + ' Columna' + CONVERT(VARCHAR(10), @Contador) + '	VARCHAR(7900)'
-
-	IF (@Contador <> @CantidadColumnas)
-	BEGIN
-		SELECT	@Query = @Query + ', '
-	END ELSE BEGIN
-		SELECT	@Query = @Query + ', RegistroId VARCHAR(3) )'
-	END
+	SELECT	@Query = @Query + ' Columna' + CONVERT(VARCHAR(10), @Contador) + '	VARCHAR(7900),';
 END
 
-EXECUTE @Error = sp_executesql @Query
+SELECT	@Query = SUBSTRING(@Query, 1, LEN(@Query) - 1) + ');';
+
+EXECUTE @Error = sp_executesql @Query;
 
 IF (@Error <> 0)
 BEGIN
-	SELECT	@ErrorMessage = 'Error creando tabla temporal ##TMP_Registros.'
+	PRINT	'Error creando tabla temporal ##TMP_Registros.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	DROP TABLE Script
-
-	RETURN
+	RETURN;
 END
+
 
 -- En @Query almaceno el bulk insert del archivo .txt en la tabla temporal ##TMP_Registros
-SELECT @Query =	'BULK INSERT ##TMP_Registros
-			FROM ' + '''' + REPLACE(@PathTxt, '''', '''''') + '''
-			WITH (	CODEPAGE = ''RAW'',
-				DATAFILETYPE = ''char'',
-				FIELDTERMINATOR = ''\t'',
-				ROWTERMINATOR = ''\n'')'
+SELECT	@Query = '	BULK INSERT ##TMP_Registros
+				FROM ' + '''' + REPLACE(@PathTxt, '''', '''''') + '''
+				WITH (	CODEPAGE = ''RAW'',
+					DATAFILETYPE = ''widechar'',
+					FIELDTERMINATOR = ''\t'',
+					ROWTERMINATOR = ''\n'')';
 
-EXECUTE @Error = sp_executesql @Query
+EXECUTE @Error = sp_executesql @Query;
 
 IF (@Error <> 0)
 BEGIN
-	SELECT	@ErrorMessage = 'Error en bulk insert.'
+	PRINT	'Error en bulk insert.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	DROP TABLE Script
+	DROP TABLE ##TMP_Registros;
 
-	DROP TABLE ##TMP_Registros
-
-	RETURN
+	RETURN;
 END
 
-DECLARE @Columnas VARCHAR(7900)
+DECLARE @Columnas VARCHAR(7900);
 
-SELECT	@Columnas = '('
+SELECT	@Columnas = '(';
 
-SELECT	@Contador = 0
+SELECT	@Contador = 0;
 
--- Loop para determinar la cadena de values.
+
+-- Agrego la columna RegistroId a la tabla temporal ##TMP_Registros
+ALTER TABLE ##TMP_Registros
+	ADD RegistroId INT IDENTITY(1, 1);
+
+
+-- LOOP para determinar la cadena de values
 WHILE (@Contador <> @CantidadColumnas)
 BEGIN
-	SELECT	@Contador = @Contador + 1
+	SELECT	@Contador = @Contador + 1;
 
-	SELECT	@Query = 'SELECT @Columnas = @Columnas + (SELECT Columna' + CONVERT(VARCHAR(10), @Contador) + ' FROM ##TMP_Registros WHERE RegistroId = 1)'
+	SELECT	@Query = 'SELECT @Columnas = @Columnas + (SELECT Columna' + CONVERT(VARCHAR(10), @Contador) + ' FROM ##TMP_Registros WHERE RegistroId = 1)';
 
-	SELECT	@QueryParams = '@Columnas VARCHAR(7900) OUTPUT'
+	SELECT	@QueryParams = '@Columnas VARCHAR(7900) OUTPUT';
 
-	EXECUTE @Error = sp_executesql @Query, @QueryParams, @Columnas = @Columnas OUTPUT
+	EXECUTE @Error = sp_executesql @Query, @QueryParams, @Columnas = @Columnas OUTPUT;
 
 	IF (@Error <> 0)
 	BEGIN
-		SELECT	@ErrorMessage = 'Error obteniendo las columnas de la tabla (query dinámica).'
+		PRINT	'Error obteniendo las columnas de la tabla (query dinámica).';
 
-		PRINT	@ErrorMessage
+		DROP TABLE Script;
 
-		DROP TABLE Script
+		DROP TABLE ##TMP_Registros;
 
-		DROP TABLE ##TMP_Registros
-
-		RETURN
+		RETURN;
 	END
 
 	IF (@Contador <> @CantidadColumnas)
 	BEGIN
-		SELECT	@Columnas = @Columnas + ', '
+		SELECT	@Columnas = @Columnas + ', ';
 	END ELSE BEGIN
-		SELECT	@Columnas = @Columnas + ')'
+		SELECT	@Columnas = @Columnas + ')';
 	END
 END
 
--- Variables de uso dinámico.
-DECLARE @CantidadRegistros	INT
-DECLARE @ContadorAux		INT
-DECLARE @Values			VARCHAR(7900)
-DECLARE @ColumnasLog		VARCHAR(7900)
-DECLARE @ValuesLog		VARCHAR(7900)
-DECLARE @ColumnaValor		VARCHAR(7900)
-DECLARE @ColumnaNombre		VARCHAR(7900)
 
-SELECT	@CantidadRegistros = COUNT(*) - 1 FROM ##TMP_Registros
+-- Variables de uso dinámico
+DECLARE @CantidadRegistros	INT,
+	@ContadorAux		INT,
+	@Values			VARCHAR(7900),
+	@ColumnasLog		VARCHAR(7900),
+	@ValuesLog		VARCHAR(7900),
+	@ColumnaValor		VARCHAR(7900),
+	@ColumnaNombre		VARCHAR(7900),
+	@ColumnaTipo		VARCHAR(255);
 
-SELECT	@Contador = 0
+SELECT	@CantidadRegistros = COUNT(*) - 1 FROM ##TMP_Registros;
 
--- Tabla temporal donde se va a almacenar el tipo de columna para determinar el insert.
-CREATE TABLE ##TMP_Columnas (
-	Table_Cat		VARCHAR(255),
-	Table_Schem		VARCHAR(255),
-	Table_Name		VARCHAR(255),
-	Column_Name		VARCHAR(255),
-	Data_Type		INT,
-	Type_Name		VARCHAR(255),
-	Column_Size		INT,
-	Buffer_Length		INT,
-	Decimal_Digits		INT,
-	Num_Prec_Radix		INT,
-	Nullable		INT,
-	Remarks			VARCHAR(255),
-	Column_Def		VARCHAR(255),
-	Sql_Data_Type		INT,
-	Sql_Datetime_Sub	INT,
-	Char_Octet_Length	INT,
-	Ordinal_Position	INT,
-	Is_Nullable		VARCHAR(255),
-	Ss_Data_Type		INT
-)
+SELECT	@Contador = 0;
 
--- Loop principal donde se recorren los registros del archivo .txt.
+
+-- LOOP principal donde se recorren los registros del archivo .txt
 WHILE (@Contador <> @CantidadRegistros)
 BEGIN
-	SELECT	@Contador = @Contador + 1
+	SELECT	@Contador = @Contador + 1;
 
-	SELECT	@ContadorAux = 0
+	SELECT	@ContadorAux = 0;
 
-	SELECT	@Values = '('
+	SELECT	@Values = '(';
 
-	-- Loop para determinar variables @Columnas y @Values.
+	-- LOOP para determinar variables @Columnas y @Values
 	WHILE (@ContadorAux <> @CantidadColumnas)
 	BEGIN
-		SELECT	@ContadorAux = @ContadorAux + 1
+		SELECT	@ContadorAux = @ContadorAux + 1;
 
-		SELECT	@Query = 'SELECT @ColumnaValor = Columna' + CONVERT(VARCHAR(10), @ContadorAux) + ' FROM ##TMP_Registros WHERE RegistroId = @Contador + 1'
+		SELECT	@Query = 'SELECT @ColumnaValor = Columna' + CONVERT(VARCHAR(10), @ContadorAux) + ' FROM ##TMP_Registros WHERE RegistroId = @Contador + 1';
 
-		SELECT	@QueryParams = '@Contador INT, @ColumnaValor VARCHAR(7900) OUTPUT'
+		SELECT	@QueryParams = '@Contador INT, @ColumnaValor VARCHAR(7900) OUTPUT';
 
 		EXECUTE @Error = sp_executesql @Query, @QueryParams,
 					@Contador	= @Contador,
-					@ColumnaValor	= @ColumnaValor OUTPUT
+					@ColumnaValor	= @ColumnaValor OUTPUT;
 
 		IF (@Error <> 0)
 		BEGIN
-			SELECT	@ErrorMessage = 'Error obteniendo ColumnaValor (query dinámica).'
+			PRINT	'Error obteniendo ColumnaValor (query dinámica).';
 
-			PRINT	@ErrorMessage
+			DROP TABLE Script;
 
-			DROP TABLE Script
+			DROP TABLE ##TMP_Registros;
 
-			DROP TABLE ##TMP_Registros
+			DROP TABLE ##TMP_Columnas;
 
-			DROP TABLE ##TMP_Columnas
-
-			RETURN
+			RETURN;
 		END
 
-		SELECT	@Query = '	SELECT	@ColumnaNombre = Columna' + CONVERT(VARCHAR(10), @ContadorAux) + ' FROM ##TMP_Registros WHERE RegistroId = 1
+		SELECT	@Query = '	SELECT	@ColumnaNombre = Columna' + CONVERT(VARCHAR(10), @ContadorAux) + ' FROM ##TMP_Registros WHERE RegistroId = 1;
 
-					DELETE ##TMP_Columnas
+					SELECT	@ColumnaTipo = data_type FROM <<BBDD>>.information_schema.columns WHERE table_schema = @Owner AND table_name = @Tabla AND column_name = @ColumnaNombre;
 
-					INSERT INTO ##TMP_Columnas
-						EXECUTE sp_columns_ex
-							@Table_Server	= @Ambiente,
-							@Table_Name	= @Tabla,
-							@Table_Schema	= ''dbo'',
-							@Table_Catalog	= @BBDD,
-							@Column_Name	= @ColumnaNombre
-
-					IF ((SELECT Type_Name FROM ##TMP_Columnas) = ''int'')
+					IF (@ColumnaTipo = ''int'')
 					BEGIN
-						SELECT	@Values = @Values + (SELECT Columna' + CONVERT(VARCHAR(10), @ContadorAux) + ' FROM ##TMP_Registros WHERE RegistroId = @Contador + 1)
+						SELECT	@Values = @Values + (SELECT Columna' + CONVERT(VARCHAR(10), @ContadorAux) + ' FROM ##TMP_Registros WHERE RegistroId = @Contador + 1);
 					END ELSE BEGIN
-						SELECT	@Values = @Values + '''''''' + ''' + @ColumnaValor + ''' + ''''''''
-					END'
+						SELECT	@Values = @Values + '''''''' + ''' + @ColumnaValor + ''' + '''''''';
+					END';
 
-		SELECT	@QueryParams = '@Contador INT, @Ambiente VARCHAR(255), @Tabla VARCHAR(255), @BBDD VARCHAR(255), @ColumnaNombre VARCHAR(7900) OUTPUT, @Values VARCHAR(7900) OUTPUT'
+		SELECT	@Query = REPLACE(@Query, '<<BBDD>>', @BBDD);
+
+		SELECT	@QueryParams = '@Contador INT, @Tabla VARCHAR(255), @Owner VARCHAR(255), @ColumnaTipo VARCHAR(255) OUTPUT, @ColumnaNombre VARCHAR(7900) OUTPUT, @Values VARCHAR(7900) OUTPUT';
 
 		EXECUTE @Error = sp_executesql @Query, @QueryParams,
 					@Contador	= @Contador,
-					@Ambiente	= @Ambiente,
 					@Tabla		= @Tabla,
-					@BBDD		= @BBDD,
+					@Owner		= @Owner,
+					@ColumnaTipo	= @ColumnaTipo OUTPUT,
 					@ColumnaNombre	= @ColumnaNombre OUTPUT,
-					@Values		= @Values OUTPUT
+					@Values		= @Values OUTPUT;
 
 		IF (@Error <> 0)
 		BEGIN
-			SELECT	@ErrorMessage = 'Error obteniendo los registros de la tabla (query dinámica).'
+			PRINT	'Error obteniendo los registros de la tabla (query dinámica).';
 
-			PRINT	@ErrorMessage
+			DROP TABLE Script;
 
-			DROP TABLE Script
+			DROP TABLE ##TMP_Registros;
 
-			DROP TABLE ##TMP_Registros
-
-			DROP TABLE ##TMP_Columnas
-
-			RETURN
+			RETURN;
 		END
 
 		IF (@ContadorAux <> @CantidadColumnas)
 		BEGIN
-			SELECT	@Values = @Values + ', '
+			SELECT	@Values = @Values + ', ';
 		END ELSE BEGIN
-			SELECT	@Values = @Values + ')'
+			SELECT	@Values = @Values + ')';
 		END
 	END
 
-	-- Inserto registro.
-	INSERT INTO Script(Texto) VALUES('------------------------ Registro ' + CONVERT(VARCHAR(10), @Contador) + ' ------------------------')
-	INSERT INTO Script(Texto) VALUES('INSERT INTO ' + @Tabla + ' ' + @Columnas)
-	INSERT INTO Script(Texto) VALUES('	VALUES ' + @Values)
-	INSERT INTO Script(Texto) VALUES('')
-	INSERT INTO Script(Texto) VALUES('IF (@@ERROR <> 0)')
-	INSERT INTO Script(Texto) VALUES('BEGIN')
-	INSERT INTO Script(Texto) VALUES('	ROLLBACK TRANSACTION Insert_Tabla')
-	INSERT INTO Script(Texto) VALUES('')
-	INSERT INTO Script(Texto) VALUES('	PRINT ''Error insertando registro ' + CONVERT(VARCHAR(10), @Contador) + ' en tabla.''')
-	INSERT INTO Script(Texto) VALUES('')
-	INSERT INTO Script(Texto) VALUES('	RETURN')
-	INSERT INTO Script(Texto) VALUES('END')
-	INSERT INTO Script(Texto) VALUES('')
+	-- Inserto registro
+	INSERT INTO Script(Texto) VALUES('------------------------ Registro ' + CONVERT(VARCHAR(10), @Contador) + ' ------------------------');
+	INSERT INTO Script(Texto) VALUES('INSERT INTO ' + @Tabla + ' ' + @Columnas);
+	INSERT INTO Script(Texto) VALUES('	VALUES ' + @Values + ';');
+	INSERT INTO Script(Texto) VALUES('');
+	INSERT INTO Script(Texto) VALUES('SELECT	@Error = @@ERROR;');
+	INSERT INTO Script(Texto) VALUES('');
+	INSERT INTO Script(Texto) VALUES('IF (@Error <> 0)');
+	INSERT INTO Script(Texto) VALUES('BEGIN');
+	INSERT INTO Script(Texto) VALUES('	ROLLBACK TRANSACTION Insert_Tabla;');
+	INSERT INTO Script(Texto) VALUES('');
+	INSERT INTO Script(Texto) VALUES('	PRINT ''Error insertando registro ' + CONVERT(VARCHAR(10), @Contador) + ' en tabla.'';');
+	INSERT INTO Script(Texto) VALUES('');
+	INSERT INTO Script(Texto) VALUES('	RETURN;');
+	INSERT INTO Script(Texto) VALUES('END');
+	INSERT INTO Script(Texto) VALUES('');
 
 	IF (@TablaLog IS NOT NULL)
 	BEGIN
-		SELECT	@ColumnasLog = SUBSTRING(@Columnas, 1, LEN(@Columnas) - 1)
+		SELECT	@ColumnasLog = SUBSTRING(@Columnas, 1, LEN(@Columnas) - 1);
 
-		SELECT	@ColumnasLog = @ColumnasLog + ', FechaLog, SistemaLog, UsuarioLog)'
+		SELECT	@ColumnasLog = @ColumnasLog + ', FechaLog, SistemaLog, UsuarioLog)';
 
-		SELECT	@ValuesLog = SUBSTRING(@Values, 1, LEN(@Values) - 1)
+		SELECT	@ValuesLog = SUBSTRING(@Values, 1, LEN(@Values) - 1);
 
-		SELECT	@ValuesLog = @ValuesLog + ', GETDATE(), @SistemaLog, @UsuarioLog)'
+		SELECT	@ValuesLog = @ValuesLog + ', GETDATE(), @SistemaLog, @UsuarioLog);'
 
-		INSERT INTO Script(Texto) VALUES('INSERT INTO ' + @TablaLog + ' ' + @ColumnasLog)
-		INSERT INTO Script(Texto) VALUES('	VALUES ' + @ValuesLog)
-		INSERT INTO Script(Texto) VALUES('')
-		INSERT INTO Script(Texto) VALUES('')
+		INSERT INTO Script(Texto) VALUES('INSERT INTO ' + @TablaLog + ' ' + @ColumnasLog);
+		INSERT INTO Script(Texto) VALUES('	VALUES ' + @ValuesLog + ';');
+		INSERT INTO Script(Texto) VALUES('');
+		INSERT INTO Script(Texto) VALUES('SELECT	@Error = @@ERROR;');
+		INSERT INTO Script(Texto) VALUES('');
+		INSERT INTO Script(Texto) VALUES('IF (@Error <> 0)');
+		INSERT INTO Script(Texto) VALUES('BEGIN');
+		INSERT INTO Script(Texto) VALUES('	ROLLBACK TRANSACTION Insert_Tabla;');
+		INSERT INTO Script(Texto) VALUES('');
+		INSERT INTO Script(Texto) VALUES('	PRINT ''Error logueando registro ' + CONVERT(VARCHAR(10), @Contador) + ' en tabla log.'';');
+		INSERT INTO Script(Texto) VALUES('');
+		INSERT INTO Script(Texto) VALUES('	RETURN;');
+		INSERT INTO Script(Texto) VALUES('END');
+		INSERT INTO Script(Texto) VALUES('');
 	END ELSE BEGIN
-		INSERT INTO Script(Texto) VALUES('')
+		INSERT INTO Script(Texto) VALUES('');
 	END
 END
 
--- Inserto commit de transacción.
-INSERT INTO Script(Texto) VALUES('COMMIT TRANSACTION Insert_Tabla')
-INSERT INTO Script(Texto) VALUES('')
-INSERT INTO Script(Texto) VALUES('')
-INSERT INTO Script(Texto) VALUES('RETURN')
 
--- Generación del script.
+-- Inserto commit de transacción
+INSERT INTO Script(Texto) VALUES('COMMIT TRANSACTION Insert_Tabla;');
+INSERT INTO Script(Texto) VALUES('');
+INSERT INTO Script(Texto) VALUES('');
+INSERT INTO Script(Texto) VALUES('RETURN;');
+
+
+-- Generación del script
 IF (RIGHT(@PathExportacion, 1) <> '\')
 BEGIN
-	SELECT	@PathExportacion = @PathExportacion + '\'
+	SELECT	@PathExportacion = @PathExportacion + '\';
 END
 
-DECLARE @PathScript VARCHAR(1023)
+DECLARE @PathScript VARCHAR(1023);
 
-SELECT	@PathScript = @PathExportacion + 'INSERT - ' + @Tabla + '.sql'
+SELECT	@PathScript = @PathExportacion + 'INSERT - ' + @Tabla + '.sql';
 
-DECLARE @Cmd	NVARCHAR(4000)
+DECLARE @Cmd	NVARCHAR(4000);
 
-SELECT	@Cmd = 'type nul > "' + @PathScript + '"'
+SELECT	@Cmd = 'type nul > "' + @PathScript + '"';
 
-EXECUTE @Error = Master.dbo.xp_CmdShell @Cmd, NO_OUTPUT
+EXECUTE @Error = master.dbo.xp_cmdshell @Cmd, NO_OUTPUT;
 
 IF (@Error <> 0)
 BEGIN
-	SELECT	@ErrorMessage = 'Error creando archivo .sql.'
+	PRINT	'Error creando archivo .sql.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	DROP TABLE Script
+	DROP TABLE ##TMP_Registros;
 
-	DROP TABLE ##TMP_Registros
-
-	DROP TABLE ##TMP_Columnas
-
-	RETURN
+	RETURN;
 END
+
 
 -- Copiado masivo de datos a archivo .sql
-SELECT	@Cmd = 'bcp "SELECT NULLIF(Texto, '''') FROM Master.dbo.Script ORDER BY Linea" queryout "' + @PathScript + '" -c -T'
+SELECT	@Cmd = 'bcp "SELECT NULLIF(Texto, '''') FROM master.dbo.Script ORDER BY Linea" queryout "' + @PathScript + '" -w -T';
 
-EXECUTE @Error = xp_CmdShell @Cmd, NO_OUTPUT
+EXECUTE @Error = xp_CmdShell @Cmd, NO_OUTPUT;
 
 IF (@Error <> 0)
 BEGIN
-	SELECT	@ErrorMessage = 'Error copiando contenido de tabla en archivo .sql.'
+	PRINT	'Error copiando contenido de tabla en archivo .sql.';
 
-	PRINT	@ErrorMessage
+	DROP TABLE Script;
 
-	DROP TABLE Script
+	DROP TABLE ##TMP_Registros;
 
-	DROP TABLE ##TMP_Registros
-
-	DROP TABLE ##TMP_Columnas
-
-	RETURN
+	RETURN;
 END
 
--- Elimino tablas usadas.
-DROP TABLE Script
 
-DROP TABLE ##TMP_Registros
+-- Elimino tablas usadas
+DROP TABLE Script;
 
-DROP TABLE ##TMP_Columnas
-
--- Printeo el path donde se generó el script con éxito.
-PRINT	'Script generado en ' + @PathScript
+DROP TABLE ##TMP_Registros;
 
 
-RETURN
+-- Printeo el path donde se generó el script con éxito
+PRINT	'Script generado en ' + @PathScript;
+
+
+RETURN;
