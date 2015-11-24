@@ -29,7 +29,7 @@ INSERT INTO #TMP_ColumnasTablas (NombreTabla, NombreColumna, FlagProcesado, Flag
 		FROM	sys.objects SO
 		INNER JOIN	sys.columns SC
 			ON	SO.OBJECT_ID = SC.OBJECT_ID
-		WHERE	SO.type = 'U' AND <Condiciones sobre las tablas y las columnas>
+		WHERE	<Condiciones de busqueda>
 		/* Ejemplo donde se buscan columnas que contengan Pers o Perm en su nombre y no sean de baja ni de alta ni de modificacion
 		WHERE	SO.type = 'U' AND
 			SO.name NOT LIKE '%Log%' AND
@@ -52,7 +52,7 @@ BEGIN
 		FROM	#TMP_ColumnasTablas TMP
 		WHERE	TMP.FlagProcesado = 0;
 
-	SELECT	@SQL = '	IF (EXISTS(SELECT TOP (1) * FROM ' + @Tabla + ' WHERE ' + @Columna + ' LIKE ''%<String a buscar>%''))
+	SELECT	@SQL = '	IF (EXISTS(SELECT TOP (1) * FROM ' + @Tabla + ' WHERE [' + @Columna + '] LIKE ''%<String a buscar>%''))
 				BEGIN
 					SELECT @Cantidad = 1
 				END ELSE BEGIN
@@ -63,6 +63,8 @@ BEGIN
 
 	IF (@Error <> 0)
 	BEGIN
+		PRINT	@SQL;
+
 		PRINT	'Error al ejecutar consulta dinámica.';
 
 		DROP TABLE #TMP_ColumnasTablas;
